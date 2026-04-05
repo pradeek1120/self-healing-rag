@@ -1,5 +1,5 @@
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 class RAGAction(BaseModel):
     action_type: str
@@ -16,6 +16,7 @@ class RAGObservation(BaseModel):
     step_number: int = 0
     message: str = ""
     reward: float = 0.0
+    done: bool = False
 
 class RAGState(BaseModel):
     episode_id: str = ""
