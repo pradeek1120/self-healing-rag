@@ -345,3 +345,4 @@ class RAGEnvironment(Environment):
             message=message,
             reward=reward,
         )
+
