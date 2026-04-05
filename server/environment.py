@@ -112,11 +112,12 @@ class RAGEnvironment(Environment):
         if r["success"]:
             self._ctx["fixes_applied"]+=1; remaining=self._db.count_remaining_outdated(); total=self._task.get("total_outdated",5); fixed=self._ctx["fixes_applied"]
             progress=round(0.5+(fixed/total)*0.4,2)
-            if remaining==0: self._ctx["database_fixed"]=True; return self._obs(f"Fixed {a.target_doc_id}! ALL {total} docs fixed! Verify now.",0.9)
+            if remaining==0: self._ctx["database_fixed"]=True; self._ctx["fixes_applied"]+=1; return self._obs(f"Fixed {a.target_doc_id}! ALL docs fixed! Now verify.",0.9)
             return self._obs(f"Fixed {a.target_doc_id}! {remaining} remaining. Keep fixing.",progress)
         return self._obs(f"Fix failed: {r['message']}",0.1)
     def _audit_verify(self,a):
         remaining=self._db.count_remaining_outdated()
+        self._ctx["database_fixed"]=True if remaining==0 else self._ctx["database_fixed"]
         if remaining==0: self._ctx["audit_complete"]=True; self._done=True; return self._obs(f"EXPERT AUDIT COMPLETE! Fixed {self._ctx['fixes_applied']} docs across all topics!",1.0)
         return self._obs(f"Audit incomplete. {remaining} outdated docs remain.",0.3)
 
