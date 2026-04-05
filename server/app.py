@@ -6,7 +6,12 @@ from models import RAGAction, RAGObservation
 app = create_app(RAGEnvironment, RAGAction, RAGObservation)
 
 def main():
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    uvicorn.run(
+        "server.app:app",
+        host="0.0.0.0",
+        port=7860,
+        workers=1
+    )
 
 if __name__ == "__main__":
     main()
