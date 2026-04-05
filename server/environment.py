@@ -91,7 +91,7 @@ class RAGEnvironment(Environment):
         if r["success"]: self._ctx["database_fixed"]=True; return self._obs(f"Fixed! {r['message']}. Verify now.",0.9)
         return self._obs(f"Fix failed: {r['message']}",0.2)
     def _verify(self,a):
-        if not self._ctx["database_fixed"]: return self._obs("Fix database first.",0.0)
+        if not self._ctx["database_fixed"] and self._task.get("difficulty")!="expert": return self._obs("Fix database first.",0.0)
         if self._task["correct_answer"].lower() in a.content.lower(): self._done=True; return self._obs("COMPLETE! Pipeline succeeded!",1.0)
         return self._obs("Still incorrect.",0.5)
 
@@ -117,7 +117,6 @@ class RAGEnvironment(Environment):
         return self._obs(f"Fix failed: {r['message']}",0.1)
     def _audit_verify(self,a):
         remaining=self._db.count_remaining_outdated()
-        self._ctx["database_fixed"]=True if remaining==0 else self._ctx["database_fixed"]
         if remaining==0: self._ctx["audit_complete"]=True; self._done=True; return self._obs(f"EXPERT AUDIT COMPLETE! Fixed {self._ctx['fixes_applied']} docs across all topics!",1.0)
         return self._obs(f"Audit incomplete. {remaining} outdated docs remain.",0.3)
 
