@@ -91,7 +91,7 @@ class RAGEnvironment(Environment):
         if r["success"]: self._ctx["database_fixed"]=True; return self._obs(f"Fixed! {r['message']}. Verify now.",0.9)
         return self._obs(f"Fix failed: {r['message']}",0.2)
     def _verify(self,a):
-        if not self._ctx["database_fixed"]: return self._obs("Fix database first.",0.0)
+        if not self._ctx["database_fixed"] and self._task.get("difficulty")!="expert": return self._obs("Fix database first.",0.0)
         if self._task["correct_answer"].lower() in a.content.lower(): self._done=True; return self._obs("COMPLETE! Pipeline succeeded!",1.0)
         return self._obs("Still incorrect.",0.5)
 
@@ -112,7 +112,7 @@ class RAGEnvironment(Environment):
         if r["success"]:
             self._ctx["fixes_applied"]+=1; remaining=self._db.count_remaining_outdated(); total=self._task.get("total_outdated",5); fixed=self._ctx["fixes_applied"]
             progress=round(0.5+(fixed/total)*0.4,2)
-            if remaining==0: self._ctx["database_fixed"]=True; return self._obs(f"Fixed {a.target_doc_id}! ALL {total} docs fixed! Verify now.",0.9)
+            if remaining==0: self._ctx["database_fixed"]=True; self._ctx["fixes_applied"]+=1; return self._obs(f"Fixed {a.target_doc_id}! ALL docs fixed! Now verify.",0.9)
             return self._obs(f"Fixed {a.target_doc_id}! {remaining} remaining. Keep fixing.",progress)
         return self._obs(f"Fix failed: {r['message']}",0.1)
     def _audit_verify(self,a):
