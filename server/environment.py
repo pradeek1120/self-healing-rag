@@ -84,4 +84,4 @@ class RAGEnvironment(Environment):
 
     def _obs(self,msg,reward):
         docs=self._db.search(self._task["topic"])
-        return RAGObservation(question=self._task.get("question",""),retrieved_documents=docs,current_answer=self._ctx.get("current_answer"),hallucination_detected=self._ctx["hallucination_detected"],conflicting_docs=self._ctx["conflicting_docs"],database_fixed=self._ctx["database_fixed"],step_number=self._step_count,message=msg,reward=reward)
+        return RAGObservation(question=self._task.get("question",""),retrieved_documents=docs,current_answer=self._ctx.get("current_answer"),hallucination_detected=self._ctx["hallucination_detected"],conflicting_docs=self._ctx["conflicting_docs"],database_fixed=self._ctx["database_fixed"],step_number=self._step_count,message=msg,reward=reward,done=self._done)
