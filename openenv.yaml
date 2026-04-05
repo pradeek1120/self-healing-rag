@@ -1,0 +1,54 @@
+# openenv.yaml
+# This file is read by `openenv validate` and `openenv push`
+# It must be in the ROOT of your project
+
+name: self-healing-rag
+version: "1.0.0"
+description: >
+  A self-healing RAG environment where AI agents detect hallucinations
+  in an internal knowledge base, identify the source document, auto-fix
+  the database using only internal cross-referencing, and verify the
+  corrected answer. No external internet required.
+
+author: Pradeep K
+tags:
+  - rag
+  - hallucination-detection
+  - self-healing
+  - knowledge-base
+  - enterprise-ai
+  - openenv
+
+tasks:
+  - name: task_detect_hallucination
+    description: Detect if the AI answer contains hallucination from outdated internal documents
+    difficulty: easy
+    max_steps: 4
+    passing_score: 0.6
+
+  - name: task_find_source
+    description: Find which specific internal document is causing the hallucination
+    difficulty: medium
+    max_steps: 6
+    passing_score: 0.7
+
+  - name: task_full_pipeline
+    description: Full self-healing pipeline — detect, find source, fix database, verify
+    difficulty: hard
+    max_steps: 10
+    passing_score: 0.85
+
+server:
+  dockerfile: server/Dockerfile
+  port: 7860
+  health_endpoint: /health
+
+inference:
+  script: inference.py
+  timeout_minutes: 20
+  max_memory_gb: 8
+  max_vcpu: 2
+  required_env_vars:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
