@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "self-healing-rag"
+version = "1.0.0"
+description = "Self-Healing RAG Environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core>=0.2.3",
+    "openai>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+server = "rag_env_fixed.server.app:main"
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["rag_env_fixed*"]
