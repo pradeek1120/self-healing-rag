@@ -91,7 +91,6 @@ class RAGEnvironment(Environment):
         if r["success"]: self._ctx["database_fixed"]=True; return self._obs(f"Fixed! {r['message']}. Verify now.",0.9)
         return self._obs(f"Fix failed: {r['message']}",0.2)
     def _verify(self,a):
-        if not self._ctx["database_fixed"] and self._db.count_remaining_outdated()==len([d for d in self._db.documents.values() if d.get("is_outdated")]): return self._obs("Fix database first.",0.0)
         if self._task["correct_answer"].lower() in a.content.lower(): self._done=True; return self._obs("COMPLETE! Pipeline succeeded!",1.0)
         return self._obs("Still incorrect.",0.5)
 
