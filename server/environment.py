@@ -29,7 +29,12 @@ class InternalDatabase:
         return {"success":True,"message":f"Archived {doc_id}, promoted {cid}","correct_doc":self.documents[cid]}
     def count_remaining_outdated(self): return len([d for d in self.documents.values() if d.get("is_outdated") and not d.get("archived",False)])
 
-TASKS={"task_detect_hallucination":{"question":"How many days of annual leave do employees get?","topic":"leave_policy","correct_answer":"20 days","difficulty":"easy","max_steps":4,"passing_score":0.6},"task_find_source":{"question":"What is the current price of the standard plan?","topic":"pricing","correct_answer":"$99 per month","wrong_doc_id":"prod_001","difficulty":"medium","max_steps":6,"passing_score":0.7},"task_full_pipeline":{"question":"What is our refund policy?","topic":"refund_policy","correct_answer":"30 days","wrong_doc_id":"ref_001","difficulty":"hard","max_steps":10,"passing_score":0.85},"task_cross_topic_audit":{"question":"Perform a full audit of the entire knowledge base. Find and fix ALL outdated documents across ALL topics.","topic":"all","correct_answer":"audit_complete","difficulty":"expert","max_steps":15,"passing_score":0.90,"total_outdated":5}}
+TASKS={
+    "task_detect_hallucination":{"question":"How many days of annual leave do employees get?","topic":"leave_policy","correct_answer":"20 days","difficulty":"easy","max_steps":4,"passing_score":0.6},
+    "task_find_source":{"question":"What is the current price of the standard plan?","topic":"pricing","correct_answer":"$99 per month","wrong_doc_id":"prod_001","difficulty":"medium","max_steps":6,"passing_score":0.7},
+    "task_full_pipeline":{"question":"What is our refund policy?","topic":"refund_policy","correct_answer":"30 days","wrong_doc_id":"ref_001","difficulty":"hard","max_steps":10,"passing_score":0.85},
+    "task_cross_topic_audit":{"question":"Audit the entire knowledge base. Find and fix ALL outdated documents across ALL topics.","topic":"all","correct_answer":"audit_complete","difficulty":"expert","max_steps":15,"passing_score":0.90,"total_outdated":5}
+}
 
 class RAGEnvironment(Environment):
     def __init__(self):
@@ -45,7 +50,7 @@ class RAGEnvironment(Environment):
         self._step_count=0; self._episode_id=str(uuid.uuid4()); self._rewards=[]; self._done=False
         docs=self._db.search(self._task["topic"])
         msg="EXPERT AUDIT: Scan ALL topics, find and fix ALL outdated docs. Topics: leave_policy, pricing, refund_policy." if task_name=="task_cross_topic_audit" else "Episode started. Analyze documents and answer the question."
-        return RAGObservation(question=self._task["question"],retrieved_documents=docs,step_number=0,message=msg,reward=0.0)
+        return RAGObservation(question=self._task["question"],retrieved_documents=docs,step_number=0,message=msg,reward=0.0,done=False)
 
     def step(self,action):
         self._step_count+=1
@@ -75,50 +80,61 @@ class RAGEnvironment(Environment):
         self._ctx["current_answer"]=a.content
         if self._task["correct_answer"].lower() in a.content.lower(): return self._obs("Correct! Check for hallucination risk.",0.6)
         self._ctx["hallucination_detected"]=True; return self._obs("Wrong — likely outdated doc. Run detect.",0.1)
+
     def _detect(self,a):
         outdated=[d for d in self._db.get_all_versions(self._task["topic"]) if d.get("is_outdated")]
         if outdated: self._ctx["conflicting_docs"]=outdated; self._ctx["hallucination_detected"]=True; return self._obs(f"Detected {len(outdated)} outdated docs. Find source.",0.7)
         return self._obs("No conflicts found.",0.2)
+
     def _find(self,a):
         outdated_ids=[d["id"] for d in self._db.get_all_versions(self._task["topic"]) if d.get("is_outdated")]
         wrong=self._task.get("wrong_doc_id","")
         if a.target_doc_id==wrong: return self._obs(f"Source found: {a.target_doc_id}. Fix now.",0.8)
         if a.target_doc_id in outdated_ids: return self._obs("Partially correct.",0.4)
         return self._obs("Wrong document.",0.2)
+
     def _fix(self,a):
         if not a.target_doc_id: return self._obs("Specify target_doc_id.",0.0)
         r=self._db.fix_document(a.target_doc_id)
         if r["success"]: self._ctx["database_fixed"]=True; return self._obs(f"Fixed! {r['message']}. Verify now.",0.9)
         return self._obs(f"Fix failed: {r['message']}",0.2)
+
     def _verify(self,a):
-        if not self._ctx["database_fixed"] and self._db.count_remaining_outdated()==len([d for d in self._db.documents.values() if d.get("is_outdated")]): return self._obs("Fix database first.",0.0)
-        if self._task["correct_answer"].lower() in a.content.lower(): self._done=True; return self._obs("COMPLETE! Pipeline succeeded!",1.0)
-        return self._obs("Still incorrect.",0.5)
+        # Stateless — just check if answer is correct, no state dependency
+        if self._task["correct_answer"].lower() in a.content.lower():
+            self._done=True
+            return self._obs("COMPLETE! Pipeline succeeded!",1.0)
+        return self._obs("Answer incorrect. Check latest documents.",0.5)
 
     def _audit_detect(self,a):
         conflicts=self._db.get_all_topics_with_conflicts()
         total=sum(len(v) for v in conflicts.values())
         if total>0:
             self._ctx["hallucination_detected"]=True; self._ctx["conflicting_docs"]=self._db.get_all_outdated(); self._ctx["topics_audited"]=list(conflicts.keys())
-            return self._obs(f"AUDIT: {total} outdated docs across {list(conflicts.keys())}. Fix each one.",0.5)
+            return self._obs(f"AUDIT: {total} outdated docs across {list(conflicts.keys())}. Fix each one.",0.7)
         return self._obs("No conflicts across any topic.",0.1)
+
     def _audit_find(self,a):
         outdated_ids=[d["id"] for d in self._db.get_all_outdated()]
-        if a.target_doc_id in outdated_ids: return self._obs(f"Confirmed {a.target_doc_id} is outdated. Fix it. Remaining: {len(outdated_ids)}",0.6)
+        if a.target_doc_id in outdated_ids: return self._obs(f"Confirmed {a.target_doc_id} is outdated. Fix it.",0.6)
         return self._obs(f"{a.target_doc_id} not outdated or already fixed.",0.2)
+
     def _audit_fix(self,a):
         if not a.target_doc_id: return self._obs("Specify target_doc_id.",0.0)
         r=self._db.fix_document(a.target_doc_id)
         if r["success"]:
             self._ctx["fixes_applied"]+=1; remaining=self._db.count_remaining_outdated(); total=self._task.get("total_outdated",5); fixed=self._ctx["fixes_applied"]
             progress=round(0.5+(fixed/total)*0.4,2)
-            if remaining==0: self._ctx["database_fixed"]=True; self._ctx["fixes_applied"]+=1; return self._obs(f"Fixed {a.target_doc_id}! ALL docs fixed! Now verify.",0.9)
-            return self._obs(f"Fixed {a.target_doc_id}! {remaining} remaining. Keep fixing.",progress)
+            if remaining==0: self._ctx["database_fixed"]=True; return self._obs(f"ALL {total} docs fixed! Verify now.",0.9)
+            return self._obs(f"Fixed {a.target_doc_id}! {remaining} remaining.",progress)
         return self._obs(f"Fix failed: {r['message']}",0.1)
+
     def _audit_verify(self,a):
+        # Stateless — check remaining docs directly
         remaining=self._db.count_remaining_outdated()
-        self._ctx["database_fixed"]=True
-        if remaining==0: self._ctx["audit_complete"]=True; self._done=True; return self._obs(f"EXPERT AUDIT COMPLETE! Fixed {self._ctx['fixes_applied']} docs across all topics!",1.0)
+        if remaining==0:
+            self._done=True
+            return self._obs(f"EXPERT AUDIT COMPLETE! Knowledge base fully healed!",1.0)
         return self._obs(f"Audit incomplete. {remaining} outdated docs remain.",0.3)
 
     def _obs(self,message,reward):
