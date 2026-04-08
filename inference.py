@@ -107,6 +107,7 @@ for task_meta in list_tasks():
     step = 0
     rewards = []
     last_error = None
+    score = EPSILON
 
     try:
         env = RAGEnvironment()
@@ -114,7 +115,7 @@ for task_meta in list_tasks():
     except Exception as e:
         last_error = str(e)[:60]
         print(f"[STEP] step=1 action=reset reward={EPSILON:.2f} done=true error={last_error}")
-        print(f"[END] success=false steps=1 rewards={EPSILON:.2f}")
+        print(f"[END] success=false steps=1 score={EPSILON:.2f} rewards={EPSILON:.2f}")
         continue
 
     try:
@@ -152,12 +153,14 @@ for task_meta in list_tasks():
                 f"error={last_error or 'null'}"
             )
 
-        success = env.get_episode_score() >= float(task["passing_score"])
+        score = clamp_score(env.get_episode_score())
+        success = score >= float(task["passing_score"])
 
     except Exception as e:
         last_error = str(e)[:60]
         success = False
+        score = clamp_score(score)
         print(f"[STEP] step={step+1} action=error reward={EPSILON:.2f} done=true error={last_error}")
 
     rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else f"{EPSILON:.2f}"
-    print(f"[END] success={str(success).lower()} steps={step} rewards={rewards_str}")
+    print(f"[END] success={str(success).lower()} steps={step} score={score:.2f} rewards={rewards_str}")
