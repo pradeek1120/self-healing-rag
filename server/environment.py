@@ -3,8 +3,10 @@ from openenv.core.env_server.interfaces import Environment
 
 try:
     from models import RAGAction, RAGObservation, RAGState
+    from tasks import TASKS
 except ImportError:
     from ..models import RAGAction, RAGObservation, RAGState
+    from ..tasks import TASKS
 
 ALL_TOPICS = ["leave_policy", "pricing", "refund_policy"]
 MIN_SCORE = 0.01
@@ -59,35 +61,42 @@ class InternalDatabase:
     def count_remaining_outdated(self):
         return len([d for d in self.documents.values() if d.get("is_outdated") and not d.get("archived", False)])
 
-
-TASKS = {
-    "task_detect_hallucination": {"question":"How many days of annual leave do employees get?","topic":"leave_policy","correct_answer":"20 days","difficulty":"easy","max_steps":4,"passing_score":0.6},
-    "task_find_source": {"question":"What is the current price of the standard plan?","topic":"pricing","correct_answer":"$99 per month","wrong_doc_id":"prod_001","difficulty":"medium","max_steps":6,"passing_score":0.7},
-    "task_full_pipeline": {"question":"What is our refund policy?","topic":"refund_policy","correct_answer":"30 days","wrong_doc_id":"ref_001","difficulty":"hard","max_steps":10,"passing_score":0.85},
-    "task_cross_topic_audit": {"question":"Audit the entire knowledge base. Find and fix ALL outdated documents across ALL topics.","topic":"all","correct_answer":"audit_complete","difficulty":"expert","max_steps":15,"passing_score":0.90,"total_outdated":5}
-}
-
-
 class RAGEnvironment(Environment):
     def __init__(self):
         super().__init__()
         self._db = InternalDatabase()
+        self._task_name = "task_detect_hallucination"
         self._task = TASKS["task_detect_hallucination"]
-        self._ctx = {"hallucination_detected": False, "database_fixed": False, "current_answer": None, "conflicting_docs": [], "fixes_applied": 0}
+        self._ctx = self._fresh_context()
         self._step_count = 0
         self._episode_id = ""
         self._rewards = []
         self._done = False
+        self._actions = []
+
+    def _fresh_context(self):
+        return {
+            "hallucination_detected": False,
+            "database_fixed": False,
+            "current_answer": None,
+            "conflicting_docs": [],
+            "fixes_applied": 0,
+            "source_found": False,
+            "verified_correct": False,
+            "audit_completed": False,
+        }
 
     def reset(self, **kwargs):
         task_name = kwargs.get("task_name", "task_detect_hallucination")
         self._db = InternalDatabase()
+        self._task_name = task_name if task_name in TASKS else "task_detect_hallucination"
         self._task = TASKS.get(task_name, TASKS["task_detect_hallucination"])
-        self._ctx = {"hallucination_detected": False, "database_fixed": False, "current_answer": None, "conflicting_docs": [], "fixes_applied": 0}
+        self._ctx = self._fresh_context()
         self._step_count = 0
         self._episode_id = str(uuid.uuid4())
         self._rewards = []
         self._done = False
+        self._actions = []
         docs = self._db.search(self._task["topic"])
         msg = "EXPERT AUDIT: Scan ALL topics, find and fix ALL outdated docs." if task_name == "task_cross_topic_audit" else "Episode started. Analyze documents and answer the question."
         return RAGObservation(
@@ -101,6 +110,13 @@ class RAGEnvironment(Environment):
 
     def step(self, action):
         self._step_count += 1
+        self._actions.append(
+            {
+                "action_type": action.action_type,
+                "content": action.content,
+                "target_doc_id": action.target_doc_id,
+            }
+        )
         expert = self._task.get("difficulty") == "expert"
         if expert:
             if action.action_type == "detect": obs = self._audit_detect(action)
@@ -121,7 +137,7 @@ class RAGEnvironment(Environment):
 
     @property
     def state(self):
-        return RAGState(episode_id=self._episode_id, step_count=self._step_count, current_task=self._task.get("difficulty", ""), hallucination_detected=self._ctx["hallucination_detected"], database_fixed=self._ctx["database_fixed"], fix_log=self._db.fix_log, episode_rewards=self._rewards, done=self._done)
+        return RAGState(episode_id=self._episode_id, step_count=self._step_count, current_task=self._task_name, hallucination_detected=self._ctx["hallucination_detected"], database_fixed=self._ctx["database_fixed"], fix_log=self._db.fix_log, episode_rewards=self._rewards, done=self._done)
 
     def _answer(self, a):
         self._ctx["current_answer"] = a.content
@@ -142,6 +158,7 @@ class RAGEnvironment(Environment):
         outdated_ids = [d["id"] for d in self._db.get_all_versions(self._task["topic"]) if d.get("is_outdated")]
         wrong = self._task.get("wrong_doc_id", "")
         if a.target_doc_id == wrong:
+            self._ctx["source_found"] = True
             return self._obs(f"Source found: {a.target_doc_id}. Fix now.", 0.8)
         if a.target_doc_id in outdated_ids:
             return self._obs("Partially correct.", 0.4)
@@ -159,6 +176,7 @@ class RAGEnvironment(Environment):
     def _verify(self, a):
         if self._task["correct_answer"].lower() in a.content.lower():
             self._done = True
+            self._ctx["verified_correct"] = True
             return self._obs("COMPLETE! Pipeline succeeded!", MAX_SCORE)
         return self._obs("Answer incorrect. Check latest documents.", 0.5)
 
@@ -174,6 +192,7 @@ class RAGEnvironment(Environment):
     def _audit_find(self, a):
         outdated_ids = [d["id"] for d in self._db.get_all_outdated()]
         if a.target_doc_id in outdated_ids:
+            self._ctx["source_found"] = True
             return self._obs(f"Confirmed {a.target_doc_id} is outdated. Fix it.", 0.6)
         return self._obs(f"{a.target_doc_id} not outdated or already fixed.", 0.2)
 
@@ -197,11 +216,50 @@ class RAGEnvironment(Environment):
         remaining = self._db.count_remaining_outdated()
         if remaining == 0:
             self._done = True
+            self._ctx["audit_completed"] = True
+            self._ctx["verified_correct"] = True
             return self._obs("EXPERT AUDIT COMPLETE! Knowledge base fully healed!", MAX_SCORE)
         return self._obs(f"Audit incomplete. {remaining} outdated docs remain.", 0.3)
 
     def _clamp_reward(self, reward):
         return max(MIN_SCORE, min(float(reward), MAX_SCORE))
+
+    def get_episode_score(self):
+        max_steps = int(self._task["max_steps"])
+        efficiency = max(0.0, 1.0 - (self._step_count / max_steps)) if max_steps else 0.0
+
+        if self._task_name == "task_detect_hallucination":
+            score = 0.05
+            score += 0.10 if any(a["action_type"] == "answer" for a in self._actions) else 0.0
+            score += 0.25 if self._ctx["hallucination_detected"] else 0.0
+            score += 0.25 if self._ctx["conflicting_docs"] else 0.0
+            score += 0.20 if any(a["action_type"] == "detect" for a in self._actions) else 0.0
+            score += 0.14 * efficiency
+        elif self._task_name == "task_find_source":
+            score = 0.05
+            score += 0.15 if self._ctx["hallucination_detected"] else 0.0
+            score += 0.15 if any(a["action_type"] == "detect" for a in self._actions) else 0.0
+            score += 0.20 if any(a["action_type"] == "find_source" for a in self._actions) else 0.0
+            score += 0.35 if self._ctx["source_found"] else 0.0
+            score += 0.09 * efficiency
+        elif self._task_name == "task_full_pipeline":
+            score = 0.05
+            score += 0.10 if self._ctx["hallucination_detected"] else 0.0
+            score += 0.20 if self._ctx["source_found"] else 0.0
+            score += 0.25 if self._ctx["database_fixed"] else 0.0
+            score += 0.25 if self._ctx["verified_correct"] else 0.0
+            score += 0.14 * efficiency
+        else:
+            total = float(self._task.get("total_outdated", 5))
+            progress = min(1.0, self._ctx["fixes_applied"] / total) if total else 0.0
+            score = 0.05
+            score += 0.10 if self._ctx["hallucination_detected"] else 0.0
+            score += 0.50 * progress
+            score += 0.15 if self._ctx["database_fixed"] else 0.0
+            score += 0.14 if self._ctx["audit_completed"] else 0.0
+            score += 0.05 * efficiency
+
+        return round(self._clamp_reward(score), 3)
 
     def _obs(self, message, reward):
         docs = self._db.search(self._task.get("topic", "all"))
