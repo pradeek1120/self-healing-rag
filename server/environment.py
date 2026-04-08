@@ -1,8 +1,14 @@
 import uuid
 from openenv.core.env_server.interfaces import Environment
-from models import RAGAction, RAGObservation, RAGState
+
+try:
+    from models import RAGAction, RAGObservation, RAGState
+except ImportError:
+    from ..models import RAGAction, RAGObservation, RAGState
 
 ALL_TOPICS = ["leave_policy", "pricing", "refund_policy"]
+MIN_SCORE = 0.01
+MAX_SCORE = 0.99
 
 class InternalDatabase:
     def __init__(self):
@@ -84,8 +90,14 @@ class RAGEnvironment(Environment):
         self._done = False
         docs = self._db.search(self._task["topic"])
         msg = "EXPERT AUDIT: Scan ALL topics, find and fix ALL outdated docs." if task_name == "task_cross_topic_audit" else "Episode started. Analyze documents and answer the question."
-        # FIX: reward from 0.0 to 0.01
-        return RAGObservation(question=self._task["question"], retrieved_documents=docs, step_number=0, message=msg, reward=0.01, done=False)
+        return RAGObservation(
+            question=self._task["question"],
+            retrieved_documents=docs,
+            step_number=0,
+            message=msg,
+            reward=self._clamp_reward(MIN_SCORE),
+            done=False,
+        )
 
     def step(self, action):
         self._step_count += 1
@@ -95,16 +107,14 @@ class RAGEnvironment(Environment):
             elif action.action_type == "find_source": obs = self._audit_find(action)
             elif action.action_type == "fix": obs = self._audit_fix(action)
             elif action.action_type == "verify": obs = self._audit_verify(action)
-            # FIX: reward from 0.0 to 0.01
-            else: obs = self._obs("Use detect, find_source, fix, or verify.", 0.01)
+            else: obs = self._obs("Use detect, find_source, fix, or verify.", MIN_SCORE)
         else:
             if action.action_type == "answer": obs = self._answer(action)
             elif action.action_type == "detect": obs = self._detect(action)
             elif action.action_type == "find_source": obs = self._find(action)
             elif action.action_type == "fix": obs = self._fix(action)
             elif action.action_type == "verify": obs = self._verify(action)
-            # FIX: reward from 0.0 to 0.01
-            else: obs = self._obs("Unknown action.", 0.01)
+            else: obs = self._obs("Unknown action.", MIN_SCORE)
         self._rewards.append(obs.reward)
         if self._step_count >= self._task["max_steps"]: self._done = True
         return obs
@@ -139,8 +149,7 @@ class RAGEnvironment(Environment):
 
     def _fix(self, a):
         if not a.target_doc_id:
-            # FIX: reward from 0.0 to 0.01
-            return self._obs("Specify target_doc_id.", 0.01)
+            return self._obs("Specify target_doc_id.", MIN_SCORE)
         r = self._db.fix_document(a.target_doc_id)
         if r["success"]:
             self._ctx["database_fixed"] = True
@@ -150,8 +159,7 @@ class RAGEnvironment(Environment):
     def _verify(self, a):
         if self._task["correct_answer"].lower() in a.content.lower():
             self._done = True
-            # FIX: reward from 1.0 to 0.99
-            return self._obs("COMPLETE! Pipeline succeeded!", 0.99)
+            return self._obs("COMPLETE! Pipeline succeeded!", MAX_SCORE)
         return self._obs("Answer incorrect. Check latest documents.", 0.5)
 
     def _audit_detect(self, a):
@@ -171,8 +179,7 @@ class RAGEnvironment(Environment):
 
     def _audit_fix(self, a):
         if not a.target_doc_id:
-            # FIX: reward from 0.0 to 0.01
-            return self._obs("Specify target_doc_id.", 0.01)
+            return self._obs("Specify target_doc_id.", MIN_SCORE)
         r = self._db.fix_document(a.target_doc_id)
         if r["success"]:
             self._ctx["fixes_applied"] += 1
@@ -190,10 +197,23 @@ class RAGEnvironment(Environment):
         remaining = self._db.count_remaining_outdated()
         if remaining == 0:
             self._done = True
-            # FIX: reward from 1.0 to 0.99
-            return self._obs("EXPERT AUDIT COMPLETE! Knowledge base fully healed!", 0.99)
+            return self._obs("EXPERT AUDIT COMPLETE! Knowledge base fully healed!", MAX_SCORE)
         return self._obs(f"Audit incomplete. {remaining} outdated docs remain.", 0.3)
+
+    def _clamp_reward(self, reward):
+        return max(MIN_SCORE, min(float(reward), MAX_SCORE))
 
     def _obs(self, message, reward):
         docs = self._db.search(self._task.get("topic", "all"))
-        return RAGObservation(question=self._task.get("question", ""), retrieved_documents=docs, current_answer=self._ctx.get("current_answer"), hallucination_detected=self._ctx["hallucination_detected"], conflicting_docs=self._ctx["conflicting_docs"], database_fixed=self._ctx["database_fixed"], step_number=self._step_count, message=message, reward=reward, done=self._done)
+        return RAGObservation(
+            question=self._task.get("question", ""),
+            retrieved_documents=docs,
+            current_answer=self._ctx.get("current_answer"),
+            hallucination_detected=self._ctx["hallucination_detected"],
+            conflicting_docs=self._ctx["conflicting_docs"],
+            database_fixed=self._ctx["database_fixed"],
+            step_number=self._step_count,
+            message=message,
+            reward=self._clamp_reward(reward),
+            done=self._done,
+        )

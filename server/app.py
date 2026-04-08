@@ -1,7 +1,12 @@
 import uvicorn
 from openenv.core.env_server import create_app
-from server.environment import RAGEnvironment
-from models import RAGAction, RAGObservation
+
+try:
+    from server.environment import RAGEnvironment
+    from models import RAGAction, RAGObservation
+except ImportError:
+    from .environment import RAGEnvironment
+    from ..models import RAGAction, RAGObservation
 
 app = create_app(RAGEnvironment, RAGAction, RAGObservation)
 

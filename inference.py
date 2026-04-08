@@ -6,14 +6,15 @@ Uses OpenAI client, emits [START][STEP][END] logs
 
 import os
 import json
-import requests
 from openai import OpenAI
+from models import RAGAction
+from server.environment import RAGEnvironment
 
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_URL      = os.getenv("ENV_URL", "https://pradeerock-self-healing-rag.hf.space")
 BENCHMARK    = "self-healing-rag"
+EPSILON      = 0.01
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
@@ -70,10 +71,20 @@ SEQUENCES = {
 }
 
 
+def clamp_score(value):
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        score = EPSILON
+    return max(EPSILON, min(score, 1.0 - EPSILON))
+
+
 def agent_decide(obs, task, step):
     """Use LLM if available, fallback to fixed sequence."""
     try:
-        docs = obs.get("observation", {}).get("retrieved_documents", [])
+        if not API_KEY:
+            raise RuntimeError("HF_TOKEN/API_KEY not set")
+        docs = obs.retrieved_documents
         docs_text = "\n".join([
             f"[{d.get('id')}] {d.get('title')}: {d.get('content', '')[:80]}"
             for d in docs[:4]
@@ -97,7 +108,12 @@ Respond with JSON only: {{"action_type": "...", "content": "...", "target_doc_id
         text = resp.choices[0].message.content.strip()
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
-        return json.loads(text)
+        action = json.loads(text)
+        return {
+            "action_type": action.get("action_type", "answer"),
+            "content": action.get("content", ""),
+            "target_doc_id": action.get("target_doc_id"),
+        }
     except Exception:
         seq = SEQUENCES.get(task.get("difficulty", "easy"), SEQUENCES["easy"])
         idx = min(step - 1, len(seq) - 1)
@@ -113,15 +129,12 @@ for task_name, task in TASKS.items():
     last_error = None
 
     try:
-        obs = requests.post(
-            f"{ENV_URL}/reset",
-            json={"task_name": task_name},
-            timeout=30
-        ).json()
+        env = RAGEnvironment()
+        obs = env.reset(task_name=task_name)
     except Exception as e:
         last_error = str(e)[:60]
-        print(f"[STEP] step=1 action=reset reward=0.00 done=true error={last_error}")
-        print(f"[END] success=false steps=1 rewards=0.00")
+        print(f"[STEP] step=1 action=reset reward={EPSILON:.2f} done=true error={last_error}")
+        print(f"[END] success=false steps=1 rewards={EPSILON:.2f}")
         continue
 
     try:
@@ -132,18 +145,19 @@ for task_name, task in TASKS.items():
             tid = action.get("target_doc_id", None)
 
             try:
-                result = requests.post(
-                    f"{ENV_URL}/step",
-                    json={"action": {"action_type": at, "content": content, "target_doc_id": tid}},
-                    timeout=30
-                ).json()
-                # reward from environment is already 0.0-1.0
-                reward = float(result.get("reward", 0.0))
-                done = result.get("done", False)
+                result = env.step(
+                    RAGAction(
+                        action_type=at,
+                        content=content,
+                        target_doc_id=tid,
+                    )
+                )
+                reward = clamp_score(result.reward)
+                done = result.done
                 obs = result
                 last_error = None
             except Exception as e:
-                reward = 0.0
+                reward = EPSILON
                 done = True
                 last_error = str(e)[:40]
 
@@ -158,13 +172,12 @@ for task_name, task in TASKS.items():
                 f"error={last_error or 'null'}"
             )
 
-        # success = last reward is above 0 (any progress made)
-        success = len(rewards) > 0 and max(rewards) > 0.0
+        success = len(rewards) > 0 and max(rewards) > EPSILON
 
     except Exception as e:
         last_error = str(e)[:60]
         success = False
-        print(f"[STEP] step={step+1} action=error reward=0.00 done=true error={last_error}")
+        print(f"[STEP] step={step+1} action=error reward={EPSILON:.2f} done=true error={last_error}")
 
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else f"{EPSILON:.2f}"
     print(f"[END] success={str(success).lower()} steps={step} rewards={rewards_str}")

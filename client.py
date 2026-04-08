@@ -15,7 +15,11 @@ Usage:
 
 from openenv.core.env_client import EnvClient
 from openenv.core.client_types import StepResult
-from .models import RAGAction, RAGObservation, RAGState
+
+try:
+    from .models import RAGAction, RAGObservation, RAGState
+except ImportError:
+    from models import RAGAction, RAGObservation, RAGState
 
 
 class RAGEnv(EnvClient[RAGAction, RAGObservation, RAGState]):
