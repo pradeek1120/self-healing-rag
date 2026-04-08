@@ -9,6 +9,7 @@ import json
 from openai import OpenAI
 from models import RAGAction
 from server.environment import RAGEnvironment
+from tasks import TASKS, list_tasks
 
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -17,29 +18,6 @@ BENCHMARK    = "self-healing-rag"
 EPSILON      = 0.01
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
-
-TASKS = {
-    "task_detect_hallucination": {
-        "difficulty": "easy",
-        "max_steps": 4,
-        "description": "Detect hallucination from outdated internal documents"
-    },
-    "task_find_source": {
-        "difficulty": "medium",
-        "max_steps": 6,
-        "description": "Find which document is causing the hallucination"
-    },
-    "task_full_pipeline": {
-        "difficulty": "hard",
-        "max_steps": 10,
-        "description": "Full self-healing pipeline: detect, find, fix, verify"
-    },
-    "task_cross_topic_audit": {
-        "difficulty": "expert",
-        "max_steps": 15,
-        "description": "Audit entire knowledge base across all topics"
-    }
-}
 
 # Fixed action sequences per difficulty - no LLM needed for fallback
 SEQUENCES = {
@@ -120,7 +98,9 @@ Respond with JSON only: {{"action_type": "...", "content": "...", "target_doc_id
         return seq[idx]
 
 
-for task_name, task in TASKS.items():
+for task_meta in list_tasks():
+    task_name = task_meta.id
+    task = TASKS[task_name]
     print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}")
 
     done = False
@@ -172,7 +152,7 @@ for task_name, task in TASKS.items():
                 f"error={last_error or 'null'}"
             )
 
-        success = len(rewards) > 0 and max(rewards) > EPSILON
+        success = env.get_episode_score() >= float(task["passing_score"])
 
     except Exception as e:
         last_error = str(e)[:60]
