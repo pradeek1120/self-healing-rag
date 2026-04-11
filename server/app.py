@@ -26,6 +26,13 @@ app.description = (
 )
 
 
+def _serialize_task(task):
+    payload = dict(task.__dict__)
+    payload["task_id"] = task.id
+    payload["score"] = float(task.passing_score)
+    return payload
+
+
 @app.get("/")
 def root():
     return {
@@ -44,7 +51,7 @@ def root():
 @app.get("/tasks")
 def tasks():
     return {
-        "tasks": [task.__dict__ for task in list_tasks()],
+        "tasks": [_serialize_task(task) for task in list_tasks()],
         "action_schema": RAGAction.model_json_schema(),
         "observation_schema": RAGObservation.model_json_schema(),
     }
@@ -55,7 +62,7 @@ def info():
     return {
         "name": "self-healing-rag",
         "version": "1.1.0",
-        "tasks": [task.__dict__ for task in list_tasks()],
+        "tasks": [_serialize_task(task) for task in list_tasks()],
         "action_schema": RAGAction.model_json_schema(),
     }
 
