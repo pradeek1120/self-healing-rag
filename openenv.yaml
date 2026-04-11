@@ -3,12 +3,12 @@
 # It must be in the ROOT of your project
 
 name: self-healing-rag
-version: "1.0.0"
+version: "1.1.0"
 description: >
   A self-healing RAG environment where AI agents detect hallucinations
-  in an internal knowledge base, identify the source document, auto-fix
-  the database using only internal cross-referencing, and verify the
-  corrected answer. No external internet required.
+  caused by stale internal documents, identify the exact misleading
+  source, archive outdated revisions, and verify the corrected answer.
+  Task instances hide ground-truth labels and randomize document IDs.
 
 author: Pradeep K
 tags:
@@ -21,25 +21,25 @@ tags:
 
 tasks:
   - name: task_detect_hallucination
-    description: Detect if the AI answer contains hallucination from outdated internal documents
+    description: Detect when retrieved evidence contains stale conflicting documents
     difficulty: easy
     max_steps: 4
     passing_score: 0.6
 
   - name: task_find_source
-    description: Find which specific internal document is causing the hallucination
+    description: Find the exact outdated document responsible for the hallucinated answer
     difficulty: medium
     max_steps: 6
     passing_score: 0.7
 
   - name: task_full_pipeline
-    description: Full self-healing pipeline — detect, find source, fix database, verify
+    description: Full self-healing pipeline — answer, detect, find source, fix, verify
     difficulty: hard
     max_steps: 10
     passing_score: 0.85
 
   - name: task_cross_topic_audit
-    description: Expert autonomous audit of entire knowledge base across all topics
+    description: Expert autonomous audit of multiple topics with complete stale-doc cleanup
     difficulty: expert
     max_steps: 15
     passing_score: 0.90
@@ -55,6 +55,4 @@ inference:
   max_memory_gb: 8
   max_vcpu: 2
   required_env_vars:
-    - API_BASE_URL
-    - MODEL_NAME
     - HF_TOKEN

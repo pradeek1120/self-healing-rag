@@ -1,184 +1,134 @@
 ---
 title: Self-Healing RAG Environment
-emoji: 🔧
+emoji: "🛠"
 colorFrom: blue
-colorTo: purple
+colorTo: green
 sdk: docker
 pinned: false
 tags:
   - openenv
   - rag
   - hallucination
-  - self-healing
+  - evaluation
 ---
 
-# Self-Healing RAG Environment 🔧
+# Self-Healing RAG Environment
 
-> An OpenEnv environment where AI agents detect and automatically fix hallucinations
-> in a company's internal knowledge base — using only internal document cross-referencing.
+An OpenEnv benchmark for agents that must detect hallucinations caused by stale
+internal documents, identify the exact misleading source, repair the knowledge
+base, and confirm the corrected answer.
 
----
+## Why This Version Is Stronger
 
-## The Problem This Solves
+- Ground-truth labels are hidden from the observation space.
+- Document IDs are randomized on every reset, so agents cannot memorize
+  hardcoded targets.
+- Tasks are sampled from a scenario bank spanning HR, pricing, support, refund,
+  travel, and remote-work policies.
+- The baseline solver reasons over the retrieved documents instead of relying on
+  fixed answer keys.
 
-```
-Company internal database → has outdated documents
-RAG AI searches database → finds outdated doc
-AI gives wrong answer    → hallucination
-Nobody knows which doc   → caused it
-No automatic fix exists  → it keeps happening
-```
+## Task Suite
 
-**This environment trains and evaluates agents that solve this entire pipeline.**
-
----
-
-## How It Works
-
-```
-1. Agent receives question + internal documents
-2. Agent gives initial answer
-3. Agent detects conflicting/outdated documents
-4. Agent identifies which specific document caused the hallucination
-5. Agent auto-fixes the database (archives wrong doc, promotes latest)
-6. Agent verifies the corrected answer
-```
-
-All using **only internal documents** — no internet, no external APIs.
-
----
+| Task | Difficulty | Goal | Passing Score |
+| --- | --- | --- | --- |
+| `task_detect_hallucination` | Easy | Notice that retrieved evidence contains stale conflicting docs | `0.60` |
+| `task_find_source` | Medium | Name the exact outdated document that caused the hallucinated answer | `0.70` |
+| `task_full_pipeline` | Hard | Answer, detect, find, fix, and verify | `0.85` |
+| `task_cross_topic_audit` | Expert | Audit multiple topics and archive every outdated doc in scope | `0.90` |
 
 ## Quick Start
 
 ```bash
-# Install client
-pip install git+https://huggingface.co/spaces/YOUR_USERNAME/self-healing-rag
-
-# Use it
-from rag_env import RAGEnv, RAGAction
-
-with RAGEnv(base_url="https://YOUR_USERNAME-self-healing-rag.hf.space").sync() as env:
-    obs = env.reset(task_name="task_detect_hallucination")
-    result = env.step(RAGAction(action_type="answer", content="20 days"))
-    print(result.observation.message)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r server/requirements.txt
+uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
----
+In another shell:
 
-## Tasks
+```python
+from rag_env import RAGEnv, RAGAction
 
-| Task | Difficulty | Description | Passing Score |
-|------|-----------|-------------|---------------|
-| `task_detect_hallucination` | Easy | Detect if hallucination exists in retrieved docs | 0.6 |
-| `task_find_source` | Medium | Find which specific document caused the hallucination | 0.7 |
-| `task_full_pipeline` | Hard | Full pipeline: detect → find → fix → verify | 0.85 |
-
----
+with RAGEnv(base_url="http://localhost:7860").sync() as env:
+    result = env.reset(task_name="task_full_pipeline")
+    print(result.observation.question)
+    print(result.observation.retrieved_documents)
+```
 
 ## Action Space
 
-| Action | What it does | Required fields |
-|--------|-------------|-----------------|
-| `answer` | Give answer to question | `content` |
-| `detect` | Scan docs for conflicts | `content` |
-| `find_source` | Identify wrong document | `content`, `target_doc_id` |
-| `fix` | Auto-fix database | `target_doc_id` |
-| `verify` | Confirm fix with correct answer | `content` |
-
----
+| Action | Purpose |
+| --- | --- |
+| `answer` | Provide an answer grounded in the retrieved docs |
+| `detect` | Explain that the retrieved docs conflict or are outdated |
+| `find_source` | Identify the stale source doc via `target_doc_id` |
+| `fix` | Archive the stale source doc via `target_doc_id` |
+| `verify` | Confirm the corrected answer after the fix |
 
 ## Observation Space
+
+The agent sees only public document fields:
 
 ```python
 RAGObservation(
     question: str,
-    retrieved_documents: list[dict],
+    retrieved_documents: list[dict],  # id, title, content, date, topic
     current_answer: str | None,
     hallucination_detected: bool,
     conflicting_docs: list[dict],
     database_fixed: bool,
     step_number: int,
     message: str,
-    reward: float          # step-level reward 0.0–1.0
+    reward: float,
+    done: bool,
 )
 ```
 
----
+Internal labels such as `is_outdated` and `correct_doc_id` are never exposed.
 
-## Reward Function
+## Baseline
 
-Rewards given at every step (not just at end):
+`inference.py` is a deterministic baseline that:
 
-| Step | Action | Reward | Why |
-|------|--------|--------|-----|
-| 1 | Correct answer | 0.6 | Good start |
-| 2 | Hallucination detected | 0.7 | Found the problem |
-| 3 | Source doc identified | 0.8 | Found the cause |
-| 4 | Database fixed | 0.9 | Fixed the cause |
-| 5 | Verified correct | 1.0 | Complete pipeline |
+1. Parses answer-bearing values from the retrieved documents.
+2. Uses the OpenAI Python client to select the next action.
+3. Detects the conflict, finds the stale source, fixes it, and verifies the
+   latest answer.
 
----
-
-## Run Inference
+Run it with:
 
 ```bash
 export HF_TOKEN=your_token
-export API_BASE_URL=https://router.huggingface.co/v1
-export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
-export ENV_URL=https://YOUR_USERNAME-self-healing-rag.hf.space
+export API_BASE_URL=https://api.openai.com/v1
+export MODEL_NAME=gpt-4.1-mini
 
-python inference.py
+./venv/bin/python inference.py
 ```
 
----
+The script emits only `[START]`, `[STEP]`, and `[END]` lines to stdout so it
+matches the hackathon submission parser.
 
-## Run with Docker
+## Validation
 
 ```bash
-docker build -f server/Dockerfile -t self-healing-rag .
-docker run -p 7860:7860 self-healing-rag
+./venv/bin/openenv validate
 ```
 
----
+## Project Layout
 
-## Validate
-
-```bash
-pip install openenv-core
-openenv validate
+```text
+.
+├── client.py
+├── inference.py
+├── models.py
+├── openenv.yaml
+├── pyproject.toml
+├── rag_env/
+├── server/
+│   ├── app.py
+│   ├── environment.py
+│   └── requirements.txt
+└── tasks.py
 ```
-
----
-
-## Project Structure
-
-```
-self-healing-rag/
-├── models.py           # RAGAction, RAGObservation, RAGState (Pydantic)
-├── client.py           # RAGEnv HTTP client (openenv-core)
-├── __init__.py         # Package exports
-├── inference.py        # Baseline inference script (MANDATORY)
-├── openenv.yaml        # OpenEnv manifest (MANDATORY)
-├── pyproject.toml      # pip-installable package
-├── README.md           # This file
-└── server/
-    ├── app.py          # FastAPI server (openenv-core)
-    ├── environment.py  # Core logic (inherits Environment)
-    ├── requirements.txt
-    ├── Dockerfile
-    └── __init__.py
-```
-
----
-
-## Baseline Scores
-
-| Task | Difficulty | Score | Steps |
-|------|-----------|-------|-------|
-| task_detect_hallucination | Easy | 0.70 | 2 |
-| task_find_source | Medium | 0.80 | 3 |
-| task_full_pipeline | Hard | 0.90 | 5 |
-
----
-
-Built for the OpenEnv Hackathon — judged by Hugging Face & Meta engineers.
