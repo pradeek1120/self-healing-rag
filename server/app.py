@@ -3,11 +3,11 @@ from fastapi import Body
 from openenv.core.env_server import create_fastapi_app
 
 try:
-    from server.environment import RAGEnvironment
+    from server.environment import MAX_SCORE, MIN_SCORE, RAGEnvironment
     from models import RAGAction, RAGObservation
     from tasks import TASKS, list_tasks
 except ImportError:
-    from .environment import RAGEnvironment
+    from .environment import MAX_SCORE, MIN_SCORE, RAGEnvironment
     from ..models import RAGAction, RAGObservation
     from ..tasks import TASKS, list_tasks
 
@@ -29,8 +29,17 @@ app.description = (
 def _serialize_task(task):
     payload = dict(task.__dict__)
     payload["task_id"] = task.id
-    payload["score"] = float(task.passing_score)
+    payload["passing_score"] = _exclusive_score(task.passing_score)
+    payload["score"] = payload["passing_score"]
     return payload
+
+
+def _exclusive_score(value) -> float:
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        numeric_value = MIN_SCORE
+    return round(max(MIN_SCORE, min(numeric_value, MAX_SCORE)), 3)
 
 
 @app.get("/")
@@ -103,7 +112,7 @@ def grader(payload: dict = Body(default={})):
             if env.state.done:
                 break
 
-    score = env.get_episode_score()
+    score = _exclusive_score(env.get_episode_score())
     if (not trajectory) and rewards:
         if isinstance(rewards, str):
             reward_values = [float(value) for value in rewards.split(",") if value.strip()]
@@ -112,7 +121,7 @@ def grader(payload: dict = Body(default={})):
         else:
             reward_values = []
         if reward_values:
-            score = round(env._clamp_reward(sum(reward_values) / len(reward_values)), 3)
+            score = _exclusive_score(sum(reward_values) / len(reward_values))
 
     return {
         "task_name": task_name,
