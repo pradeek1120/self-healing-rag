@@ -248,6 +248,7 @@ def run_task(task_name: str) -> None:
     env = None
     rewards: List[float] = []
     step_count = 0
+    score = EPSILON
     success = False
 
     print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}")
@@ -281,14 +282,15 @@ def run_task(task_name: str) -> None:
             )
 
         if env is not None:
-            success = env.get_episode_score() >= float(task["passing_score"])
+            score = clamp_score(env.get_episode_score())
+            success = score >= float(task["passing_score"])
     finally:
         if env is not None:
             env.close()
         rewards_str = ",".join(f"{reward:.2f}" for reward in rewards)
         print(
             f"[END] success={str(success).lower()} "
-            f"steps={step_count} rewards={rewards_str}"
+            f"steps={step_count} score={score:.3f} rewards={rewards_str}"
         )
 
 
