@@ -11,12 +11,21 @@ tags:
   - evaluation
 ---
 
-# Self-Healing RAG Environment
+# Self-Healing RAG Environment for the OpenEnv Hackathon
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![OpenEnv](https://img.shields.io/badge/Benchmark-OpenEnv-1F6FEB)](https://github.com/meta-pytorch/OpenEnv)
+
+## Project Links
+
+| Resource | Link |
+| --- | --- |
+| Live API documentation | [Hugging Face Space](https://pradeerock-self-healing-rag.hf.space/docs) |
+| Source code | [GitHub repository](https://github.com/pradeek1120/self-healing-rag) |
+| Repository activity | [GitHub activity](https://github.com/pradeek1120/self-healing-rag/activity) |
+| Releases | [GitHub releases](https://github.com/pradeek1120/self-healing-rag/releases) |
 
 An OpenEnv benchmark for evaluating AI agents that detect and repair
 hallucinations caused by stale internal documents.
