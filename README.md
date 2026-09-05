@@ -13,6 +13,11 @@ tags:
 
 # Self-Healing RAG Environment
 
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![OpenEnv](https://img.shields.io/badge/Benchmark-OpenEnv-1F6FEB)](https://github.com/meta-pytorch/OpenEnv)
+
 An OpenEnv benchmark for evaluating AI agents that detect and repair
 hallucinations caused by stale internal documents.
 
@@ -69,25 +74,58 @@ date, and topic.
 ## System Architecture
 
 ```mermaid
-flowchart LR
-  A[AI Agent] -->|RAGAction| B[OpenEnv Client]
-  B -->|HTTP, WebSocket, or MCP| C[FastAPI Server]
-
-  subgraph E[Environment Runtime]
-    C --> D[RAGEnvironment]
-    D --> F[Action Router]
-    F --> G[State Machine]
-    G --> H[Reward and Score Engine]
-    G --> I[Internal Database]
+flowchart TB
+  subgraph CLIENT[Client Layer]
+    A[AI Agent]
+    B[OpenEnv Client]
+    L[Baseline Inference Agent]
   end
 
-  I --> J[Current and Historical Documents]
-  I --> K[Archive and Fix Log]
-  G -->|RAGObservation| B
+  subgraph API[API Layer]
+    C[FastAPI Server]
+    X[HTTP / WebSocket / MCP]
+  end
 
-  L[Baseline Inference Agent] -->|Optional model guidance| A
-  L --> M[OpenAI-Compatible API]
+  subgraph CORE[Environment Layer]
+    D[RAGEnvironment]
+    F[Action Router]
+    G[Episode State Machine]
+    H[Reward and Score Engine]
+  end
+
+  subgraph DATA[Knowledge Layer]
+    I[In-Memory Knowledge Base]
+    J[Current and Historical Documents]
+    K[Archive and Fix Log]
+  end
+
+  A -->|RAGAction| B
+  L -->|Planned actions| B
+  B --> X --> C --> D
+  D --> F --> G
+  G --> H
+  G <--> I
+  I --> J
+  I --> K
+  G -->|RAGObservation| B
+  L -. optional model selection .-> M[OpenAI-Compatible API]
+
+  classDef client fill:#E8F1FF,stroke:#2563EB,color:#172554,stroke-width:2px
+  classDef api fill:#E6FFFA,stroke:#0F766E,color:#134E4A,stroke-width:2px
+  classDef core fill:#FFF7ED,stroke:#EA580C,color:#7C2D12,stroke-width:2px
+  classDef data fill:#F0FDF4,stroke:#16A34A,color:#14532D,stroke-width:2px
+  classDef external fill:#F5F3FF,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+
+  class A,B,L client
+  class C,X api
+  class D,F,G,H core
+  class I,J,K data
+  class M external
 ```
+
+The request path is intentionally simple: the agent submits a typed action,
+the environment updates its private state and knowledge base, and the client
+receives a typed observation with the next reward.
 
 ### Component Responsibilities
 
